@@ -1,0 +1,279 @@
+{% load static %}
+<!doctype html>
+{% load pwa %}
+<html lang="en">
+<head>
+  {% progressive_web_app_meta %}
+  <title>Bathroom Access: Find public restrooms near you in Greater Boston</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin="anonymous">
+  <!-- JavaScript Bundle with Popper -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://kit.fontawesome.com/66634f6c24.js" crossorigin="anonymous"></script>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    .legend {
+      line-height: 18px;
+      color: #000000;
+      background-color: #ffffffcc;
+      padding: 1em;
+    }
+    .legend i {
+      width: 18px;
+      height: 18px;
+      float: left;
+      margin-right: 8px;
+      opacity: 0.7;
+    }
+  </style>
+
+  <script>
+    window.onload = function() {
+      function render(m) {
+        var ret = "<h3>" + m.name + "</h3><br><b>Address</b>: <a target=\"_blank\" href=\"https://www.google.com/maps/search/?api=1&query=" + m.latitude + "%2C" + m.longitude + "\">" + m.address + "</a><br><b>Hours</b>: " + m.hours + "<br><b>Remarks</b>: " + m.remarks.replace(/(?:\r\n|\r|\n)/g, '<br>');;
+        return ret;
+      }
+
+      const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+      const map = L.map('map', {tap: false});
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: attribution }).addTo(map);
+      const markers = JSON.parse(document.getElementById('markers-data').textContent);
+      let markerGroup = L.featureGroup([]).addTo(map);
+
+      for (var key in markers) {
+        var latlng = L.latLng(markers[key].latitude, markers[key].longitude);
+        var markerColor = 'marker-icon-2x-green.png';
+        var searchableRemarks = markers[key].remarks.toLowerCase();
+        if (searchableRemarks.includes('portapotty') || searchableRemarks.includes('seasonal'))
+          markerColor = 'marker-icon-2x-yellow.png';
+        else if (searchableRemarks.includes('inaccessible') || searchableRemarks.includes('fare control'))
+          markerColor = 'marker-icon-2x-red.png';
+        var icon = L.icon({
+          iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/" + markerColor,
+          shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png",
+          iconSize: [25, 41],
+          iconAnchor: [12, 41],
+          popupAnchor: [1, -34],
+          shadowSize: [41, 41]
+        });
+        L.marker(latlng, {icon: icon}).bindPopup(render(markers[key])).addTo(markerGroup);
+      }
+
+      function renderWithoutLocation() {
+        map.fitBounds(markerGroup.getBounds(), { maxZoom: 15, padding: [100, 100] });
+      }
+
+      {% if latitude %}
+          map.setView(new L.LatLng({{ latitude }}, {{ longitude }}), 15);
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", "/api_ordered?latitude=" + {{ latitude }} + "&longitude=" + {{ longitude }});
+          xhr.onload = function() {
+            document.getElementById("br-cards-row").innerHTML = this.responseText;
+          };
+          xhr.send();
+      {% else %}
+      navigator.geolocation.getCurrentPosition(
+        function(loc) {
+          console.log(loc.coords.latitude, loc.coords.longitude)
+          var userLatLng = new L.LatLng(loc.coords.latitude, loc.coords.longitude);
+          map.setView(userLatLng, 15);
+          var markersInView = false;
+          for (var key in markers) {
+            if (map.getBounds().contains(latlng)) {
+              markersInView = true;
+            }
+          }
+
+          if (!markersInView) {
+            renderWithoutLocation();
+          }
+
+          L.circleMarker(userLatLng, 400).addTo(map);
+
+          var xhr = new XMLHttpRequest();
+          xhr.open("GET", "/api_ordered?latitude=" + loc.coords.latitude + "&longitude=" + loc.coords.longitude);
+          xhr.onload = function() {
+            document.getElementById("br-cards-row").innerHTML = this.responseText;
+          };
+          xhr.send();
+        },
+        function (error) {
+          renderWithoutLocation();
+        },
+        {
+          enableHighAccuracy: false,
+          maximumAge: Infinity,
+          timeout: 5000
+        }
+      );
+      {% endif %}
+
+      var legend = L.control({position: 'bottomright'});
+      legend.onAdd = function(map) {
+        var div = L.DomUtil.create('div', 'info legend');
+        div.innerHTML += '<br>'
+        div.innerHTML += '<p><i style="background: #2AAD27"></i> Free, year-long bathrooms</p>';
+        div.innerHTML += '<p><i style="background: #FFD326"></i> Seasonal bathrooms (e.g. portapotties)</p>';
+        div.innerHTML += '<p><i style="background: #CB2B3E"></i> Fare-controlled or partially inaccessible bathrooms</p>';
+
+        return div;
+      }
+      
+      legend.addTo(map);
+    }
+  </script>
+</head>
+<body>
+  {{ markers|json_script:"markers-data" }}
+  <div id="map" style="height: 70%;"></div>
+  <div class="container-fluid">
+    <div class="row">
+      <div class="col">
+        <nav>
+          <div class="nav nav-tabs" id="nav-tab" role="tablist">
+            <button class="nav-link active" id="nav-brlist-tab" data-bs-toggle="tab" data-bs-target="#nav-brlist" type="button" role="tab" aria-controls="nav-brlist" aria-selected="true">List</button>
+            <button class="nav-link" id="nav-about-tab" data-bs-toggle="tab" data-bs-target="#nav-about" type="button" role="tab" aria-controls="nav-about" aria-selected="false">About</button>
+            <button class="nav-link" id="nav-feedback-tab" data-bs-toggle="tab" data-bs-target="#nav-feedback" type="button" role="tab" aria-controls="nav-feedback" aria-selected="false">Media and Feedback</button>
+            <button class="nav-link" id="nav-resources-tab" data-bs-toggle="tab" data-bs-target="#nav-resources" type="button" role="tab" aria-controls="nav-resources" aria-selected="false">Resources and Data Sharing</button>
+            <a href="https://www.twitter.com/bathroom_access"><i class="fab fa-twitter" style="font-size: 2em; margin-top: 0.2em; padding-left: 0.3em;"></i></a>
+            <a href="https://www.instagram.com/bathroom_access"><i class="fab fa-instagram" style="font-size: 2em; margin-top: 0.2em; padding-left: 0.6em;"></i></a>
+          </div>
+        </nav>
+        <div class="tab-content" id="nav-tabContent">
+          <div class="tab-pane fade show active" id="nav-brlist" role="tabpanel" aria-labelledby="nav-brlist-tab" tabindex="0">
+            <br>
+            <div class="row" id="town-dropdown">
+              <div class="col text-center">
+                <div class="dropdown">
+                  <button class="btn btn-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    View bathrooms for town...
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="/">See all towns</a></li>
+                    <li><a class="dropdown-item" href="/map?city=arlington-massachusetts">Arlington, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=andover-massachusetts">Andover, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=bedford-massachusetts">Bedford, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=braintree-massachusetts">Braintree, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=brookline-massachusetts">Brookline, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=brighton-massachusetts">Brighton, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=boston-massachusetts">Boston, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=burlington-massachusetts">Burlington, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=cambridge-massachusetts">Cambridge, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=charlestown-massachusetts">Charlestown, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=chestnut%20hill-massachusetts">Chestnut Hill, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=dorchester-massachusetts">Dorchester, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=fall%20river-massachusetts">Fall River, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=framingham-massachusetts">Framingham, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=gloucester-massachusetts">Gloucester, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=hyde%20park-massachusetts">Hyde Park, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=lexington-massachusetts">Lexington, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=marlborough-massachusetts">Marlborough, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=malden-massachusetts">Malden, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=mattapan-massachusetts">Mattapan, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=medford-massachusetts">Medford, MA</a></li>     
+                    <li><a class="dropdown-item" href="/map?city=needham-massachusetts">Needham, MA</a></li>               
+                    <li><a class="dropdown-item" href="/map?city=new%20bedford-massachusetts">New Bedford, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=newton-massachusetts">Newton, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=north%20andover-massachusetts">North Andover, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=quincy-massachusetts">Quincy, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=roslindale-massachusetts">Roslindale, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=roxbury-massachusetts">Roxbury, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=somerville-massachusetts">Somerville, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=waltham-massachusetts">Waltham, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=watertown-massachusetts">Watertown, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=wayland-massachusetts">Wayland, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=wellesley-massachusetts">Wellesley, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=west%20roxbury-massachusetts">West Roxbury, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=weston-massachusetts">Weston, MA</a></li>
+                    <li><a class="dropdown-item" href="/map?city=woburn-massachusetts">Woburn, MA</a></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <br>
+            <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xl-4 g-4" id="br-cards-row">
+              {% include "list.html" %}
+            </div>
+          </div>
+          <div class="tab-pane fade" id="nav-about" role="tabpanel" aria-labelledby="nav-about-tab" tabindex="0">
+            <br>
+            <p>
+              My name is Amith Saligrama. I am a high school student at the Commonwealth School in Boston passionately interested in improving our local communities. My interest in developing this map began in 2020, when my grandparents began to limit their daily walks due to a lack of restroom access. I realized that there are many people like my grandparents - parents with toddlers, taxi and delivery drivers - who need access to restrooms. This is a situation that has become more challenging since COVID-19 as private businesses have become reluctant to allow non-customers into their facilities.
+            </p>
+
+            <p>
+              This motivated me to create bathroomaccess.com to map and list public (not private) toilets in the Greater Boston area. I found most city websites include a list of parks, trails, and even water-filling stations, but not restrooms. However, if there are no mentions of restrooms, how inclusive are we being? Over time, my goal has become equally balanced between helping people find restrooms and advocating for our local communities to acknowledge all biological needs and be welcoming to all who use our public space.
+            </p>
+            
+            <p>
+              My work is now live on the <a href="https://www.somervillema.gov/departments/ospcd/transportation-and-infrastructure/getting-around-somerville">City of Somerville website</a> and I recently won the Rotary Club of Weston and Wayland's Youth Leadership Award for my project. I am continuing my advocacy with other cities in the Greater Boston area to include this resource on their website.
+            </p>
+
+            <p>
+              Please email me at <a href="mailto:publicbathroomaccess@gmail.com">publicbathroomaccess@gmail.com</a> if you have any general suggestions or specific public bathroom locations you may want me to add.
+            </p>
+          </div>
+          <div class="tab-pane fade" id="nav-feedback" role="tabpanel" aria-labelledby="nav-about-tab" tabindex="0">
+            <br>
+            <h3>Media coverage</h3>
+            <ul>
+              <li>
+                <p>
+                  <b>Cambridge Day (10/12/22): </b> <a href="https://www.cambridgeday.com/2022/10/12/questions-on-embedding-teens-restroom-map-but-the-fact-is-when-you-gotta-go-you-gotta-go/">"Questions on embedding teen’s restroom map, but the fact is, when you gotta go, you gotta go"</a> by Marc Levy
+                </p>
+              </li>
+              <li>
+                <p>
+                  <b>Axios Boston (08/17/22): </b> <a href="https://www.axios.com/local/boston/2022/08/17/boston-public-bathrooms">"Navigating Boston's public bathrooms"</a> by Steph Solis
+                </p>
+              </li>
+              <li>
+                <p>
+                  <b>StreetsblogMASS (07/25/22): </b> <a href="https://mass.streetsblog.org/2022/07/25/public-bathroom-access-an-undervalued-but-necessary-element-of-walking-transit-infrastructure/">"Public Bathroom Access An Undervalued But Necessary Element of Walking, Transit Infrastructure"</a> by Grecia White
+                </p>
+              </li>
+              <li>
+                <p>
+                  <b>Commonwealth School Newsletter (10/12/22): </b> <a href="https://www.commschool.org/news/news-post/~board/meet-our-students/post/where-to-go-one-students-quest-to-increase-bathroom-access">"Where to Go? One Student’s Quest to Increase Bathroom Access"</a>
+                </p>
+              </li>
+            </ul>
+            <h3>Feedback from users</h3>
+            <ul>
+              <li>“Thank you for you amazing work providing a map for accessible bathrooms. It is a tremendous resource for the many homeless clients I work with.”</li>
+              <li>"Your website is great, you did a good job with it and you should feel proud!"</li>
+              <li>"First of all thank you for compiling this resource. I have been looking for something like it and I am glad to see it. I have IBS so knowing where bathrooms are on short notice can be important for me."</li>
+            </ul>
+            <h3>Feedback from running/biking groups</h3>
+            <ul>
+              <li>"Thanks for sharing your public-restroom resource with us. We will keep this practical info in mind when suggesting cycling routes for our customers and club riders." - <b>Landry's Bicycles</b></li>
+              <li>“This is really wonderful. Thanks so much for doing this.” - <b>Bike Rides for Ordinary People</b></li>
+              <li>"Thank you very much for sending your awesome website to Cambridge Running Club! This will be a very helpful resource for runners! We will highlight it in our monthly newsletter. Great work!" - <b>Cambridge Running Club</b></li>
+              <li>"We've passed it onto our community and appreciate you sending it across! Keep up the good work and stay awesome." - <b>Midnight Runners Community Support Team</b></li>
+            </ul>
+          </div>
+          <div class="tab-pane fade" id="nav-resources" role="tabpanel" aria-labelledby="nav-resources-tab" tabindex="0">
+            <br>
+            <p>
+              <a href="https://drive.google.com/file/d/1YxGligGs_RjfzGNGZdlt9NHER_gaWEdf/view?usp=sharing">Flyer that explains how to use this site</a>
+            </p>
+            <p>I am happy to share data and resources with other community projects. Please email me at <a href="mailto:publicbathroomaccess@gmail.com">publicbathroomaccess@gmail.com</a> for access to an API or other data formats.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
